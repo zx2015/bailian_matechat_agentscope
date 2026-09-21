@@ -85,6 +85,48 @@ cd frontend && npm install && npm run dev
 | `make update APP_ID=x` | Update an existing deployed app |
 | `make clean` | Remove build artifacts (backend + frontend) |
 
+## Deploying to Bailian
+
+Uploading uses `runtime-fc-deploy` (a CLI from the `agentscope-runtime`
+package — note: that repo is archived upstream in favor of AgentScope 2.0,
+but the CLI script is still published and works).
+
+```bash
+# One-time: install the deploy tool + cloud SDKs it needs
+pip install agentscope-runtime alibabacloud-oss-v2 alibabacloud-credentials alibabacloud-tea-util
+
+# Deployment-only env vars (separate from the app's own runtime config above):
+#   ALIBABA_CLOUD_ACCESS_KEY_ID / _SECRET  -- reused from your .env
+#   MODELSTUDIO_WORKSPACE_ID               -- usually same value as BAILIAN_WORKSPACE_ID,
+#                                              but a different tool reading a different env var name
+export MODELSTUDIO_WORKSPACE_ID=<your-workspace-id>
+
+make build                          # builds frontend + wheel (dist/*.whl)
+make upload NAME=my-rag-agent       # uploads dist/*.whl, creates a new app
+# ...or, to update an existing one:
+make update APP_ID=<deploy-id-from-previous-upload>
+```
+
+A successful upload prints a `Deploy ID` and a console URL
+(`https://bailian.console.aliyun.com/?tab=app#/app-center`). Check status
+any time with `agentscope status <deploy-id>` or `agentscope list`.
+
+**Important — the wheel's own metadata must declare its dependencies.**
+`--whl-path` mode uploads *only* the wheel; there's no separate
+`requirements.txt` upload step, so pip resolves dependencies purely from
+the wheel's `Requires-Dist` metadata. That's why `pyproject.toml` declares
+`[project.dependencies]` (direct deps, pinned) even though `requirements.txt`
+(fully-pinned, transitive-inclusive) remains the source of truth for local
+dev installs — keep both in sync when adding a new direct dependency.
+
+**Important — environment variables for the deployed app.** `runtime-fc-deploy`
+in `--whl-path` mode has no flag to pass the app's own runtime env vars
+(`DASHSCOPE_API_KEY`, `ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET`,
+`BAILIAN_WORKSPACE_ID`, `BAILIAN_INDEX_ID`, etc.) — since `config.py` is
+fail-fast, the app will crash on startup until these are configured in the
+**Bailian console** for the deployed app (under its settings/环境变量 after
+opening it from the app center URL above).
+
 ## Environment Variables
 
 See `.env.example` for the full list with descriptions. To find your
@@ -111,7 +153,8 @@ digital-native documents (parsed with `DOCMIND_DIGITAL`) — see
 ## Architecture
 
 See `docs/superpowers/specs/2026-09-21-bailian-rag-agent-design.md` for the full design spec
-(includes the stage 1.1 MateChat + AgentScope update and the stage 1.2 direct-Retrieve-API update).
+(includes the stage 1.1 MateChat + AgentScope update, stage 1.2 direct-Retrieve-API update,
+and the stage 1.3 deployment notes).
 
 ## License
 

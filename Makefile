@@ -33,16 +33,18 @@ build: frontend-build  ## Build wheel, bundling the MateChat frontend (artifact 
 	$(PYTHON) -m pip install --quiet build
 	$(PYTHON) -m build
 
-upload:  ## Upload to Bailian (usage: make upload NAME=my-rag-agent)
+upload:  ## Upload to Bailian (usage: make upload NAME=my-rag-agent). Requires MODELSTUDIO_WORKSPACE_ID + ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET in the environment.
 ifndef NAME
 	$(error NAME is required, e.g. make upload NAME=my-rag-agent)
 endif
+	$(PYTHON) -m pip install --quiet "agentscope-runtime" alibabacloud-oss-v2 alibabacloud-credentials alibabacloud-tea-util
 	runtime-fc-deploy --deploy-name "$(NAME)" --whl-path dist/*.whl
 
 update:  ## Update a deployed app (usage: make update APP_ID=xxx)
 ifndef APP_ID
 	$(error APP_ID is required, e.g. make update APP_ID=d8a48e...)
 endif
+	$(PYTHON) -m pip install --quiet "agentscope-runtime" alibabacloud-oss-v2 alibabacloud-credentials alibabacloud-tea-util
 	runtime-fc-deploy --update "$(APP_ID)" --whl-path dist/*.whl
 
 clean:  ## Remove build artifacts

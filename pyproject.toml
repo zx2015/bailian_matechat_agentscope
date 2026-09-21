@@ -9,6 +9,22 @@ description = "Bailian Rich Code Application with RAG (stage 1)"
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "MIT"}
+# Top-level (direct) runtime dependencies, pinned to match requirements.txt.
+# Declared here so the built wheel's own METADATA carries them -- the
+# Bailian "rich code" deploy path (`runtime-fc-deploy --whl-path ...`)
+# uploads only the wheel itself (no separate requirements.txt), so pip must
+# be able to resolve deps from the wheel's own Requires-Dist metadata.
+# Transitive dependencies are intentionally left unpinned here (resolved by
+# pip from each package's own metadata); requirements.txt remains the
+# source of truth for fully-pinned local dev/CI installs.
+dependencies = [
+    "fastapi==0.139.0",
+    "uvicorn==0.43.0",
+    "pydantic==2.13.4",
+    "agentscope==1.0.21",
+    "alibabacloud_bailian20231229==2.14.4",
+    "alibabacloud_tea_openapi==0.4.6",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

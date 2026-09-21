@@ -527,3 +527,67 @@ aliyun bailian Retrieve --WorkspaceId <ws> --IndexId <idx> --Query "..."  # 直�
 - `make test` 仍 23 项全绿（该验证不改动代码，仅调整 `.env` 运行时配置）。
 
 **结论**：阶段 1.2 的直连 `Retrieve` API 架构改造 + 知识库解析方式修正后，RAG 检索链路端到端验证通过，回答确认是基于知识库真实内容生成，而非模型通用知识编造。
+
+---
+
+## 附录 C：阶段 1.3 更新（真实部署到百炼平台）
+
+**日期**：2026-09-21（同日追加）
+
+### C.1 部署工具确认
+
+官方"高代码应用"部署走的是 `runtime-fc-deploy` CLI（来自 PyPI 包 `agentscope-runtime`）。**注意**：`agentscope-runtime` 这个 GitHub 仓库已被官方标注为 archived（能力已并入 AgentScope 2.0，建议新项目直接用 AgentScope 2.0），但截至本次验证，`agentscope-runtime==1.1.6.post2` 在 PyPI 上仍可正常安装，且其 `runtime-fc-deploy` 控制台脚本（`agentscope_runtime.engine.deployers.cli_fc_deploy:main`）功能完好，用真实凭据实测部署成功。
+
+### C.2 发现并修复的关键 bug：`pyproject.toml` 缺少 `[project.dependencies]`
+
+`runtime-fc-deploy --whl-path <whl>` 模式**只上传 wheel 文件本身**，不会额外读取或上传 `requirements.txt`——阅读 `agentscope_runtime/engine/deployers/modelstudio_deployer.py` 源码确认：`_upload_and_deploy()` 只把 `wheel_path` 传给 OSS 预签名上传和 `_modelstudio_deploy()`，没有任何 `requirements.txt` 相关逻辑。这意味着：**百炼云端安装这个 wheel 时，能装到的依赖只有 wheel 自身 `METADATA` 里的 `Requires-Dist` 字段**。
+
+而项目原来的 `pyproject.toml` 完全没有 `[project.dependencies]`，打出来的 wheel 元数据里不含任何依赖声明——按这个流程部署上去，云端大概率会因为 `import fastapi`/`import agentscope` 失败而无法启动。
+
+**修复**：在 `pyproject.toml` 新增 `dependencies = [...]`，声明直接依赖（`fastapi`、`uvicorn`、`pydantic`、`agentscope`、`alibabacloud_bailian20231229`、`alibabacloud_tea_openapi`），版本号与 `requirements.txt` 保持一致。间接依赖不在此处列出，交给 pip 从各自包的元数据里解析——`requirements.txt`（`pip freeze` 全量锁定）仍是本地开发/CI 安装的权威来源，两者需要在新增直接依赖时保持同步。
+
+### C.3 部署本机额外需要的工具依赖
+
+实际执行 `runtime-fc-deploy` 时，报错缺少云 SDK：
+
+```
+RuntimeError: Cloud SDKs not installed. Please install: alibabacloud-oss-v2
+alibabacloud-bailian20231229 alibabacloud-credentials alibabacloud-tea-openapi
+alibabacloud-tea-util
+```
+
+其中 `alibabacloud-bailian20231229`、`alibabacloud-tea-openapi` 项目本身已经装了（RAG 直连检索用），额外补装：`alibabacloud-oss-v2`（上传 wheel 到 OSS 临时存储用）、`alibabacloud-credentials`、`alibabacloud-tea-util`。这几个是**部署工具本机需要**的依赖，不是被部署应用的运行时依赖，因此写进 `Makefile` 的 `upload`/`update` 目标里现装，而不是写进 `pyproject.toml`/`requirements.txt`。
+
+### C.4 环境变量：部署工具 vs. 应用运行时是两套不同变量
+
+`runtime-fc-deploy` 依赖：
+
+- `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`（与应用运行时复用同一对 AK/SK）
+- `MODELSTUDIO_WORKSPACE_ID`（阅读 `modelstudio_deployer.py` 源码确认的确切变量名）——通常和应用运行时用的 `BAILIAN_WORKSPACE_ID` 是同一个值，但这是两个不同工具各自读取的不同变量名，必须都设置。
+
+`--whl-path` 模式下，`runtime-fc-deploy` **没有任何命令行参数可以传递应用自身运行所需的环境变量**（`DASHSCOPE_API_KEY`、`ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID` 等）。由于 `config.py` 是 fail-fast 设计，部署上去的应用在这些变量配置完成前会启动失败。这些变量需要在**百炼控制台**里为该应用单独配置（应用中心 → 找到应用 → 环境变量设置），这一步不在 CLI 覆盖范围内，需要用户手动完成。
+
+### C.5 实际部署验证
+
+用真实凭据执行：
+
+```bash
+make build   # 打包前端 + wheel，产出 2.4MB 左右的 dist/*.whl
+export MODELSTUDIO_WORKSPACE_ID=llm-plczmpfp1dumpit2
+make upload NAME=bailian-matechat-agentscope-demo
+```
+
+结果：
+
+```
+Deploy ID: 24927e7f-143a-4d95-b097-c7d0d7d013d9
+Console URL: https://bailian.console.aliyun.com/?tab=app#/app-center
+```
+
+`agentscope list` / `agentscope status <deploy-id>` 确认状态为 `running`（注：这只反映部署 API 调用成功、云端资源已创建，不代表应用内部 `/health` 已经通过——环境变量配置好之前应用大概率还在崩溃重启）。
+
+### C.6 后续待办（记录于 TODO.md）
+
+- [ ] 用户需登录百炼控制台，为已部署的应用（Deploy ID `24927e7f-143a-4d95-b097-c7d0d7d013d9`）配置运行时环境变量后，才能真正对话验证
+- [ ] 确认环境变量配置生效后，重新检查应用 `/health` 与 `/process` 是否可用
+- [ ] 评估是否需要迁移到 AgentScope 2.0 自带的部署能力（因为 `agentscope-runtime` 已 archived，长期看 `runtime-fc-deploy` 可能不再维护）
