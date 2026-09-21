@@ -1,0 +1,22 @@
+# Local env
+.env
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+src/*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local knowledge base (per global CLAUDE.md)
+.learnings/
+
+# IDE
+.vscode/
+.idea/
