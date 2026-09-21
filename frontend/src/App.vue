@@ -135,16 +135,20 @@ async function onSubmit(text: string) {
   startPage.value = false;
   inputValue.value = '';
   messages.value.push({ from: 'user', content: query });
-  const assistantMsg: ChatMessage = { from: 'assistant', content: '', loading: true };
-  messages.value.push(assistantMsg);
+  messages.value.push({ from: 'assistant', content: '', loading: true });
+  // Mutate through the array index (the reactive proxy Vue's template reads
+  // from), not the raw object literal above -- holding a reference to the
+  // raw object and mutating it directly after push() bypasses Vue's
+  // reactivity tracking entirely, so the UI would never update.
+  const assistantIdx = messages.value.length - 1;
 
   try {
     const answer = await callProcess(query);
-    assistantMsg.content = answer;
+    messages.value[assistantIdx].content = answer;
   } catch (err) {
-    assistantMsg.content = `请求失败：${(err as Error).message}`;
+    messages.value[assistantIdx].content = `请求失败：${(err as Error).message}`;
   } finally {
-    assistantMsg.loading = false;
+    messages.value[assistantIdx].loading = false;
   }
 }
 
