@@ -35,3 +35,56 @@ def test_process_response_construction():
     )
     assert resp.session_id == "s1"
     assert resp.usage["output_tokens"] == 20
+
+
+from bailian_rag_demo.app.runtime_agent import RuntimeAgent
+from bailian_rag_demo.rag.bailian_kb import BaiLianKB
+from bailian_rag_demo.config import Settings
+
+
+def _settings():
+    return Settings(DASHSCOPE_API_KEY="sk-test", BAILIAN_APP_ID="app-test")
+
+
+def test_runtime_agent_assembles_prompt_with_rag_context(monkeypatch):
+    kb = BaiLianKB(_settings())
+    # pre-seed with deterministic hits
+    from bailian_rag_demo.rag.base import RetrievalHit
+    monkeypatch.setattr(kb, "retrieve", lambda q, top_k=5: [
+        RetrievalHit(content="ctx-1", source="doc1.md", score=0.9)
+    ])
+
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"output": {"text": "OK answer"}, "usage": {"input_tokens": 5, "output_tokens": 7}}
+
+    monkeypatch.setattr("bailian_rag_demo.app.runtime_agent.dashscope", __import__("dashscope", fromlist=["*"]))
+    monkeypatch.setattr("dashscope.Generation.call", fake_call)
+
+    agent = RuntimeAgent(settings=_settings(), kb=kb)
+    out = agent.run("what is X?", session_id="s1")
+
+    assert out == "OK answer"
+    assert "ctx-1" in captured["prompt"]
+    assert "what is X?" in captured["prompt"]
+
+
+def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
+    kb = BaiLianKB(_settings())
+    monkeypatch.setattr(kb, "retrieve", lambda q, top_k=5: [])
+
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"output": {"text": "no context answer"}}
+
+    monkeypatch.setattr("dashscope.Generation.call", fake_call)
+
+    agent = RuntimeAgent(settings=_settings(), kb=kb)
+    out = agent.run("nope?")
+    assert out == "no context answer"
+    assert "what is X?" not in captured["prompt"]
+    assert "nope?" in captured["prompt"]
