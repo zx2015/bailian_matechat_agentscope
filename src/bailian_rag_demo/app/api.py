@@ -13,6 +13,7 @@ from bailian_rag_demo.app.schemas import (
     ProcessResponse,
     Message,
     TextContent,
+    Reference,
 )
 from bailian_rag_demo.config import Settings, load_settings
 from bailian_rag_demo.rag.base import KnowledgeBase
@@ -57,7 +58,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             user_text = _extract_user_text(request)
             kb = get_kb(cfg)
-            answer, usage = await agent.run_async(
+            answer, usage, sources = await agent.run_async(
                 user_text, kb, session_id=request.session_id
             )
             return ProcessResponse(
@@ -69,6 +70,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 ],
                 session_id=request.session_id,
                 usage=usage,
+                references=(
+                    [Reference(source=h.source, score=h.score) for h in sources]
+                    if sources
+                    else None
+                ),
             )
         except HTTPException:
             raise

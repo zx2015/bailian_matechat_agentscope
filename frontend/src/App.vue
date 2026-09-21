@@ -34,12 +34,19 @@
           align="right"
           :avatar-config="{ name: '我' }"
         ></McBubble>
-        <McBubble
-          v-else
-          :content="msg.content"
-          :avatar-config="{ imgSrc: 'https://matechat.gitcode.com/logo.svg' }"
-          :loading="msg.loading"
-        ></McBubble>
+        <template v-else>
+          <McBubble
+            :content="msg.content"
+            :avatar-config="{ imgSrc: 'https://matechat.gitcode.com/logo.svg' }"
+            :loading="msg.loading"
+          ></McBubble>
+          <div v-if="msg.references?.length" class="references">
+            <span class="references-label">参考资料：</span>
+            <span v-for="(ref, refIdx) in msg.references" :key="refIdx" class="reference-tag">
+              {{ ref.source }}（相关度 {{ ref.score.toFixed(2) }}）
+            </span>
+          </div>
+        </template>
       </template>
     </McLayoutContent>
 
@@ -84,10 +91,16 @@ import { ref } from 'vue';
 import { Button } from 'vue-devui/button';
 import 'vue-devui/button/style.css';
 
+interface Reference {
+  source: string;
+  score: number;
+}
+
 interface ChatMessage {
   from: 'user' | 'assistant';
   content: string;
   loading?: boolean;
+  references?: Reference[];
 }
 
 const description = [
@@ -111,7 +124,7 @@ const messages = ref<ChatMessage[]>([]);
 const sessionId =
   (crypto as any).randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-async function callProcess(text: string): Promise<string> {
+async function callProcess(text: string): Promise<{ answer: string; references: Reference[] }> {
   const resp = await fetch('/process', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -125,7 +138,9 @@ async function callProcess(text: string): Promise<string> {
   }
   const data = await resp.json();
   const parts = data?.output?.[0]?.content ?? [];
-  return parts.map((p: any) => p.text).join('') || '(空回复)';
+  const answer = parts.map((p: any) => p.text).join('') || '(空回复)';
+  const references: Reference[] = data?.references ?? [];
+  return { answer, references };
 }
 
 async function onSubmit(text: string) {
@@ -143,8 +158,9 @@ async function onSubmit(text: string) {
   const assistantIdx = messages.value.length - 1;
 
   try {
-    const answer = await callProcess(query);
+    const { answer, references } = await callProcess(query);
     messages.value[assistantIdx].content = answer;
+    messages.value[assistantIdx].references = references;
   } catch (err) {
     messages.value[assistantIdx].content = `请求失败：${(err as Error).message}`;
   } finally {
@@ -192,6 +208,26 @@ body {
   gap: 12px;
   overflow: auto;
   padding: 4px 2px;
+}
+
+.references {
+  margin: -4px 0 4px 44px;
+  font-size: 12px;
+  color: #71757f;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.references-label {
+  font-weight: 500;
+}
+
+.reference-tag {
+  background: #f0f1f5;
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 
 .intro-prompt {

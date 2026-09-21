@@ -19,7 +19,15 @@ class ProcessRequest(BaseModel):
     user_id: Optional[str] = None
 
 
+class Reference(BaseModel):
+    """A knowledge base source document that contributed to the answer."""
+
+    source: str
+    score: float
+
+
 class ProcessResponse(BaseModel):
     output: List[Message]
     session_id: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
+    references: Optional[List[Reference]] = None

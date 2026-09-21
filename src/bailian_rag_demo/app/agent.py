@@ -32,10 +32,12 @@ async def _chat_loop() -> None:
             break
         if not query or query.lower() in {"exit", "quit"}:
             break
-        answer, usage = await agent.run_async(query, kb, session_id=session_id)
+        answer, usage, sources = await agent.run_async(query, kb, session_id=session_id)
         print(f"Assistant: {answer}")
         if usage:
             print(f"  (usage: {usage})")
+        if sources:
+            print("  (references: " + ", ".join(f"{s.source} ({s.score:.2f})" for s in sources) + ")")
 
 
 def main() -> None:

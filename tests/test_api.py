@@ -94,12 +94,14 @@ def test_runtime_agent_assembles_prompt_with_rag_context(monkeypatch):
     monkeypatch.setattr(DashScopeChatModel, "__call__", fake_call)
 
     agent = RuntimeAgent(settings=_settings())
-    out, usage = agent.run("what is X?", kb, session_id="s1")
+    out, usage, sources = agent.run("what is X?", kb, session_id="s1")
 
     assert out == "OK answer"
     assert usage == {"input_tokens": 5, "output_tokens": 7}
     assert "ctx-1" in str(captured["prompt"])
+    assert "doc1.md" in str(captured["prompt"])
     assert "what is X?" in str(captured["prompt"])
+    assert sources == [RetrievalHit(content="ctx-1", source="doc1.md", score=0.9)]
 
 
 def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
@@ -113,9 +115,10 @@ def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
     )
 
     agent = RuntimeAgent(settings=_settings())
-    out, usage = agent.run("nope?", kb)
+    out, usage, sources = agent.run("nope?", kb)
     assert out == "no context answer"
     assert usage is None
+    assert sources == []
 
 
 def test_health_returns_ok(client):
@@ -176,6 +179,8 @@ def test_process_with_rag_context(client, monkeypatch):
     assert body["usage"] == {"input_tokens": 12, "output_tokens": 34}
     assert fake_kb.calls == [("what?", 5)]
     assert "ctx-1" in str(captured["prompt"])
+    assert "doc1.md" in str(captured["prompt"])
+    assert body["references"] == [{"source": "doc1.md", "score": 0.9}]
 
 
 def test_process_handles_rag_empty(client, monkeypatch):
@@ -201,6 +206,7 @@ def test_process_handles_rag_empty(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["output"][0]["content"][0]["text"] == "ok"
+    assert resp.json()["references"] is None
 
 
 def test_process_invalid_request_returns_422(client):

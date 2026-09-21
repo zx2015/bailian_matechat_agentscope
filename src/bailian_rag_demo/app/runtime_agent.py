@@ -12,10 +12,10 @@ agent orchestration.
 """
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from bailian_rag_demo.config import Settings
-from bailian_rag_demo.rag.base import KnowledgeBase
+from bailian_rag_demo.rag.base import KnowledgeBase, RetrievalHit
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,11 @@ except ImportError:  # pragma: no cover
 SYSTEM_PROMPT = (
     "You are a helpful assistant for the Bailian RAG demo. Answer the "
     "user's question using the provided reference material when relevant. "
-    "If no reference material is given, answer from general knowledge."
+    "Each reference chunk is labeled with its source document name -- "
+    "when your answer relies on a reference chunk, mention which source "
+    "document(s) it came from (e.g. \"根据《文档名》...\"). If no reference "
+    "material is given, or none of it is relevant, answer from general "
+    "knowledge and say so."
 )
 
 _DEFAULT_SESSION_KEY = "__default__"
@@ -100,37 +104,49 @@ class RuntimeAgent:
         return self._sessions[key]
 
     @staticmethod
-    def _build_user_content(query: str, context: str) -> str:
-        if not context:
+    def _build_user_content(query: str, hits: List[RetrievalHit]) -> str:
+        if not hits:
             return query
-        return (
-            f"[参考资料]\n{context}\n\n[用户问题]\n{query}"
+        context = "\n---\n".join(
+            f"[来源: {h.source}]\n{h.content}" for h in hits
         )
+        return f"[参考资料]\n{context}\n\n[用户问题]\n{query}"
+
+    @staticmethod
+    def _dedupe_sources(hits: List[RetrievalHit]) -> List[RetrievalHit]:
+        """Collapse multiple chunks from the same source document into one
+        reference entry (keeping the highest score), for a clean
+        "which document was this from" list in the API response."""
+        best: Dict[str, RetrievalHit] = {}
+        for hit in hits:
+            existing = best.get(hit.source)
+            if existing is None or hit.score > existing.score:
+                best[hit.source] = hit
+        return sorted(best.values(), key=lambda h: h.score, reverse=True)
 
     async def run_async(
         self,
         query: str,
         kb: KnowledgeBase,
         session_id: Optional[str] = None,
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+    ) -> Tuple[str, Optional[Dict[str, Any]], List[RetrievalHit]]:
         hits = kb.retrieve(query, top_k=self._settings.BAILIAN_RAG_TOP_K)
-        context = "\n---\n".join(h.content for h in hits) if hits else ""
 
         agent, model = self._get_agent(session_id)
         user_msg = Msg(
             name="user",
             role="user",
-            content=self._build_user_content(query, context),
+            content=self._build_user_content(query, hits),
         )
         reply = await agent(user_msg)
         text = reply.get_text_content() or ""
-        return text, model.last_usage
+        return text, model.last_usage, self._dedupe_sources(hits)
 
     def run(
         self,
         query: str,
         kb: KnowledgeBase,
         session_id: Optional[str] = None,
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+    ) -> Tuple[str, Optional[Dict[str, Any]], List[RetrievalHit]]:
         """Synchronous convenience wrapper (used by local debugging/tests)."""
         return asyncio.run(self.run_async(query, kb, session_id=session_id))
