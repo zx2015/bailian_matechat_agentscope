@@ -32,7 +32,7 @@
           v-if="msg.from === 'user'"
           :content="msg.content"
           align="right"
-          :avatar-config="{ name: 'me' }"
+          :avatar-config="{ name: '我' }"
         ></McBubble>
         <McBubble
           v-else
@@ -43,7 +43,7 @@
       </template>
     </McLayoutContent>
 
-    <div class="shortcut" style="display: flex; align-items: center; gap: 8px">
+    <div class="shortcut">
       <McPrompt
         v-if="!startPage"
         :list="simplePrompt"
@@ -51,21 +51,27 @@
         style="flex: 1"
         @item-click="(e: any) => onSubmit(e.label)"
       ></McPrompt>
-      <button class="new-conversation-btn" title="新建对话" @click="newConversation">
-        + 新建对话
-      </button>
+      <Button icon="add" shape="round" size="sm" @click="newConversation">新建对话</Button>
     </div>
 
     <McLayoutSender>
       <McInput
         :value="inputValue"
         :max-length="2000"
+        placeholder="输入你的问题，回车发送…"
         @change="(e: string) => (inputValue = e)"
         @submit="onSubmit"
       >
         <template #extra>
           <div class="input-foot-wrapper">
-            <span class="input-foot-maxlength">{{ inputValue.length }}/2000</span>
+            <div class="input-foot-left">
+              <span class="input-foot-maxlength">{{ inputValue.length }}/2000</span>
+            </div>
+            <div class="input-foot-right">
+              <Button icon="op-clearup" shape="round" size="sm" :disabled="!inputValue" @click="inputValue = ''">
+                清空输入
+              </Button>
+            </div>
           </div>
         </template>
       </McInput>
@@ -75,6 +81,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { Button } from 'vue-devui/button';
+import 'vue-devui/button/style.css';
 
 interface ChatMessage {
   from: 'user' | 'assistant';
@@ -147,15 +155,78 @@ function newConversation() {
 }
 </script>
 
-<style scoped>
+<style>
+body {
+  margin: 0;
+  background: #f5f6fa;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    sans-serif;
+}
+
 .container {
-  height: 100vh;
+  width: min(1000px, 100vw - 40px);
+  margin: 20px auto;
+  height: calc(100vh - 40px);
+  padding: 20px;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
+
 .content-container {
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 4px 2px;
 }
-.new-conversation-btn {
-  white-space: nowrap;
-  cursor: pointer;
+
+.intro-prompt {
+  width: 100%;
+  max-width: 640px;
+}
+
+.operations {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #71757f;
+  font-size: 18px;
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.input-foot-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  margin-right: 8px;
+}
+
+.input-foot-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-foot-maxlength {
+  font-size: 12px;
+  color: #71757f;
 }
 </style>
