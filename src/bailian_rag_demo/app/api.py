@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from bailian_rag_demo.app.runtime_agent import RuntimeAgent
 from bailian_rag_demo.app.schemas import (
@@ -38,7 +39,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="Bailian RAG Demo")
     cfg = settings or load_settings()
 
-    @app.get("/health")
+    @app.get("/health", response_class=PlainTextResponse)
     def health_check():
         return "OK"
 
@@ -48,7 +49,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             user_text = _extract_user_text(request)
             kb = get_kb(cfg)
             agent = RuntimeAgent(settings=cfg, kb=kb)
-            answer = agent.run(user_text, session_id=request.session_id)
+            answer, usage = agent.run(user_text, session_id=request.session_id)
             return ProcessResponse(
                 output=[
                     Message(
@@ -57,6 +58,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     )
                 ],
                 session_id=request.session_id,
+                usage=usage,
             )
         except HTTPException:
             raise

@@ -16,3 +16,7 @@ include = ["bailian_rag_demo*"]
 
 [tool.setuptools.package-data]
 bailian_rag_demo = ["main.py"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -80,6 +80,23 @@ def test_bailian_kb_retrieve_returns_empty_on_exception(caplog):
     assert hits == []
 
 
+def test_bailian_kb_retrieve_timeout_returns_empty(caplog):
+    import time
+    settings = _settings(timeout=0.05)
+    kb = BaiLianKB(settings)
+
+    def slow_call(**kwargs):
+        time.sleep(0.2)
+        return {"output": {"text": "too slow"}}
+
+    with patch("bailian_rag_demo.rag.bailian_kb.dashscope") as mock_ds:
+        mock_ds.Application.call.side_effect = slow_call
+        hits = kb.retrieve("query")
+
+    assert hits == []
+    assert any("timeout" in record.message.lower() for record in caplog.records)
+
+
 def test_bailian_kb_add_documents_not_implemented():
     kb = BaiLianKB(_settings())
     with pytest.raises(NotImplementedError):

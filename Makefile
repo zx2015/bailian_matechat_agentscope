@@ -13,7 +13,7 @@ dev:  ## Run uvicorn locally (requires .env or shell exports)
 	$(PYTHON) -m uvicorn bailian_rag_demo.main:app --reload --host 127.0.0.1 --port 8000
 
 test:  ## Run pytest
-	PYTHONPATH=src $(PYTHON) -m pytest tests/ -v
+	$(PYTHON) -m pytest tests/ -v
 
 test-upload:  ## Curl-based smoke test against locally-running server
 	bash scripts/test_local.sh

@@ -64,9 +64,10 @@ def test_runtime_agent_assembles_prompt_with_rag_context(monkeypatch):
     monkeypatch.setattr("dashscope.Generation.call", fake_call)
 
     agent = RuntimeAgent(settings=_settings(), kb=kb)
-    out = agent.run("what is X?", session_id="s1")
+    out, usage = agent.run("what is X?", session_id="s1")
 
     assert out == "OK answer"
+    assert usage == {"input_tokens": 5, "output_tokens": 7}
     assert "ctx-1" in captured["prompt"]
     assert "what is X?" in captured["prompt"]
 
@@ -84,8 +85,9 @@ def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
     monkeypatch.setattr("dashscope.Generation.call", fake_call)
 
     agent = RuntimeAgent(settings=_settings(), kb=kb)
-    out = agent.run("nope?")
+    out, usage = agent.run("nope?")
     assert out == "no context answer"
+    assert usage is None or usage == {}
     assert "what is X?" not in captured["prompt"]
     assert "nope?" in captured["prompt"]
 
@@ -93,7 +95,7 @@ def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
 def test_health_returns_ok(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.text == '"OK"'
+    assert resp.text == "OK"
 
 
 def test_process_with_rag_context(client, monkeypatch):
@@ -118,7 +120,10 @@ def test_process_with_rag_context(client, monkeypatch):
     captured = {}
     def fake_call(**kwargs):
         captured.update(kwargs)
-        return {"output": {"choices": [{"message": {"content": "answer with ctx"}}]}}
+        return {
+            "output": {"choices": [{"message": {"content": "answer with ctx"}}]},
+            "usage": {"input_tokens": 12, "output_tokens": 34},
+        }
     monkeypatch.setattr("dashscope.Generation.call", fake_call)
 
     resp = client.post(
@@ -136,6 +141,7 @@ def test_process_with_rag_context(client, monkeypatch):
     assert body["output"][0]["role"] == "assistant"
     assert body["output"][0]["content"][0]["text"] == "answer with ctx"
     assert body["session_id"] == "s1"
+    assert body["usage"] == {"input_tokens": 12, "output_tokens": 34}
     assert fake_kb.calls == [("what?", 5)]
     assert "ctx-1" in captured["prompt"]
 

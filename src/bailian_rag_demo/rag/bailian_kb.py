@@ -1,4 +1,5 @@
 """Bailian (Alibaba Cloud Model Studio) RAG backend via dashscope."""
+import concurrent.futures
 import logging
 from typing import List, Dict, Optional
 
@@ -29,12 +30,22 @@ class BaiLianKB(KnowledgeBase):
         return "bailian"
 
     def retrieve(self, query: str, top_k: int = 5) -> List[RetrievalHit]:
+        timeout = self._settings.RAG_TIMEOUT_SEC
         try:
-            response = dashscope.Application.call(
-                app_id=self._settings.BAILIAN_APP_ID,
-                prompt=query,
-                top_k=top_k,
-            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(
+                    dashscope.Application.call,
+                    app_id=self._settings.BAILIAN_APP_ID,
+                    prompt=query,
+                    top_k=top_k,
+                )
+                try:
+                    response = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        "BaiLianKB.retrieve timeout after %ss", timeout
+                    )
+                    return []
             return self._parse_response(response)
         except Exception as exc:  # broad: bail to empty + log
             logger.warning("BaiLianKB.retrieve failed: %s", exc)
