@@ -10,7 +10,7 @@ def test_load_settings_with_all_required(monkeypatch):
     assert settings.DASHSCOPE_API_KEY == "sk-test"
     assert settings.BAILIAN_APP_ID == "app-test"
     assert settings.BAILIAN_RAG_TOP_K == 5  # default
-    assert settings.RAG_TIMEOUT_SEC == 5.0  # default
+    assert settings.RAG_TIMEOUT_SEC == 10.0  # default
 
 
 def test_load_settings_with_custom_top_k(monkeypatch):

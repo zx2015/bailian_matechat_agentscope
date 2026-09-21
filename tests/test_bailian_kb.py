@@ -54,8 +54,14 @@ def test_bailian_kb_retrieve_parses_dashscope_response():
     call_kwargs = mock_ds.Application.call.call_args.kwargs
     assert call_kwargs["app_id"] == "app-test"
     assert call_kwargs["prompt"] == "what is X?"
-    assert "top_k" in str(call_kwargs) or call_kwargs.get("top_k") == 3 or True
-    # top_k passed in some form (dashscope uses different param names per version)
+    # `top_k` must NEVER be forwarded to Application.call: on the real
+    # dashscope API it's an LLM sampling parameter (candidate set size),
+    # not a "number of retrieved docs" knob, and passing it here would
+    # silently corrupt generation behavior instead of controlling
+    # retrieval scope. `doc_reference_type` is what actually requests
+    # `doc_references` back from a RAG-bound Bailian app.
+    assert "top_k" not in call_kwargs
+    assert call_kwargs["doc_reference_type"] == "indexed"
 
 
 def test_bailian_kb_retrieve_empty_when_no_references():

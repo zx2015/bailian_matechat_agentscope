@@ -10,7 +10,10 @@ class Settings:
     BAILIAN_APP_ID: str
     BAILIAN_RAG_TOP_K: int = 5
     LOG_LEVEL: str = "INFO"
-    RAG_TIMEOUT_SEC: float = 5.0
+    # Real-world dashscope.Application.call latency for RAG-bound apps was
+    # observed to range ~1.4s-10.8s; 5s caused frequent silent timeouts that
+    # dropped retrieval context. 10s balances responsiveness vs reliability.
+    RAG_TIMEOUT_SEC: float = 10.0
 
 
 def _require(name: str) -> str:
@@ -27,5 +30,5 @@ def load_settings() -> Settings:
         BAILIAN_APP_ID=_require("BAILIAN_APP_ID"),
         BAILIAN_RAG_TOP_K=int(os.getenv("BAILIAN_RAG_TOP_K", "5")),
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
-        RAG_TIMEOUT_SEC=float(os.getenv("RAG_TIMEOUT_SEC", "5.0")),
+        RAG_TIMEOUT_SEC=float(os.getenv("RAG_TIMEOUT_SEC", "10.0")),
     )

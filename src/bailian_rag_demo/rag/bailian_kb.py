@@ -37,7 +37,16 @@ class BaiLianKB(KnowledgeBase):
                     dashscope.Application.call,
                     app_id=self._settings.BAILIAN_APP_ID,
                     prompt=query,
-                    top_k=top_k,
+                    # NOTE: dashscope.Application.call's `top_k` parameter
+                    # controls LLM *sampling* (candidate set size), not the
+                    # number of retrieved documents -- there is no
+                    # client-side knob for retrieval count on this API; the
+                    # Bailian app's bound knowledge base/pipeline config
+                    # controls that server-side. Do NOT pass `top_k` here
+                    # (it would silently change generation behavior).
+                    # `doc_reference_type="indexed"` asks the API to return
+                    # `doc_references` when the app has RAG configured.
+                    doc_reference_type="indexed",
                 )
                 try:
                     response = future.result(timeout=timeout)
@@ -46,7 +55,16 @@ class BaiLianKB(KnowledgeBase):
                         "BaiLianKB.retrieve timeout after %ss", timeout
                     )
                     return []
-            return self._parse_response(response)
+            hits = self._parse_response(response)
+            if not hits:
+                logger.info(
+                    "BaiLianKB.retrieve returned no doc_references for "
+                    "app_id=%s; verify in the Bailian console that this "
+                    "app is bound to a knowledge base with indexed "
+                    "documents.",
+                    self._settings.BAILIAN_APP_ID,
+                )
+            return hits
         except Exception as exc:  # broad: bail to empty + log
             logger.warning("BaiLianKB.retrieve failed: %s", exc)
             return []
