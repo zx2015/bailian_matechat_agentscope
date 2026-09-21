@@ -43,7 +43,13 @@ from bailian_rag_demo.config import Settings
 
 
 def _settings():
-    return Settings(DASHSCOPE_API_KEY="sk-test", BAILIAN_APP_ID="app-test")
+    return Settings(
+        DASHSCOPE_API_KEY="sk-test",
+        ALIBABA_CLOUD_ACCESS_KEY_ID="ak-test",
+        ALIBABA_CLOUD_ACCESS_KEY_SECRET="ak-secret-test",
+        BAILIAN_WORKSPACE_ID="ws-test",
+        BAILIAN_INDEX_ID="idx-test",
+    )
 
 
 def _fake_model_call(text, usage=None):

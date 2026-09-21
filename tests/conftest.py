@@ -7,7 +7,13 @@ from bailian_rag_demo.config import Settings
 
 @pytest.fixture
 def fake_settings():
-    return Settings(DASHSCOPE_API_KEY="sk-test", BAILIAN_APP_ID="app-test")
+    return Settings(
+        DASHSCOPE_API_KEY="sk-test",
+        ALIBABA_CLOUD_ACCESS_KEY_ID="ak-test",
+        ALIBABA_CLOUD_ACCESS_KEY_SECRET="ak-secret-test",
+        BAILIAN_WORKSPACE_ID="ws-test",
+        BAILIAN_INDEX_ID="idx-test",
+    )
 
 
 @pytest.fixture

@@ -461,3 +461,57 @@ requires-python = ">=3.10"
 - [ ] 本地 `make dev` 后，浏览器访问 `http://127.0.0.1:8000/` 可看到 MateChat 对话界面并能提问
 - [ ] 百炼应用中心部署后，`/` 路径可直接访问 MateChat UI；应用中心自带对话面板通过 `/process` 调用同一 `RuntimeAgent`，行为一致
 - [ ] `make test` 全部通过，且不发起真实网络调用
+
+---
+
+## 附录 B：阶段 1.2 更新（RAG 检索改为直连知识库 Retrieve API）
+
+**日期**：2026-09-21（同日追加）
+**变更原因**：用户实测发现聊天回答疑似未真正走 RAG 检索（日志反复出现 `BaiLianKB.retrieve timeout after 5.0s`）。排查过程中发现：
+
+1. `dashscope.Application.call()` 的 `top_k` 参数实际是 **LLM 采样参数**（候选集大小），与"检索返回文档数"无关——之前的代码误用了它。
+2. 真实延迟在 1.4s~10.8s 浮动，默认 5s 超时导致检索经常被静默跳过。
+3. 最关键的问题：`dashscope.Application.call` 要求先在百炼控制台把"应用"手动绑定到某个知识库，且**没有任何 API 能验证/查询这个绑定关系**。用户提供的两个 `BAILIAN_APP_ID` 分别是"能调用但未绑定知识库"和"完全无效的 ID"，导致 `doc_references` 恒为 `null`，模型的"知识库里有哪些文档"之类回答其实是纯编造。
+
+### B.1 用官方 CLI 定位真实可用的知识库
+
+安装官方 `aliyun` CLI（`aliyun-cli`）后，用 AK/SK 直接调用百炼**知识库管理 OpenAPI**（`bailian` 产品，`2023-12-29` 版本）验证：
+
+```bash
+aliyun bailian ListIndices --WorkspaceId <workspace-id>          # 列出工作空间下所有知识库
+aliyun bailian ListIndexDocuments --WorkspaceId <ws> --IndexId <idx>  # 列出某知识库下的文档
+aliyun bailian Retrieve --WorkspaceId <ws> --IndexId <idx> --Query "..."  # 直接检索测试
+```
+
+确认了工作空间 `llm-plczmpfp1dumpit2` 下存在一个真实、已建索引完成的知识库"政策法规"（`IndexId=4e25svhqsl`，4 篇 PDF 文档），且 `Retrieve` 调用能返回真实匹配片段（带 score、文档名），证明知识库检索基础设施本身完全正常——问题出在"应用绑定"这一层，而不是知识库本身。
+
+### B.2 架构变更：`BaiLianKB` 直连 `Retrieve` API
+
+- **不再**通过 `dashscope.Application.call()`（依赖应用与知识库的控制台绑定关系）。
+- **改为**直接调用 Bailian OpenAPI 的 `Retrieve` 接口，通过官方 SDK `alibabacloud_bailian20231229`（`Client.retrieve(workspace_id, RetrieveRequest(index_id=..., query=..., dense_similarity_top_k=...))`）。
+- 鉴权方式从 `DASHSCOPE_API_KEY` 变为 **AccessKey（AK/SK）**——这是与 LLM 调用完全独立的一套凭据。`DASHSCOPE_API_KEY` 仍用于 `RuntimeAgent` 里 AgentScope 的 `DashScopeChatModel`（LLM 生成），两者互不影响。
+- 新增必填配置：`ALIBABA_CLOUD_ACCESS_KEY_ID`、`ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID`；`BAILIAN_APP_ID` 降级为可选/deprecated 字段（暂保留字段定义，代码不再使用）。
+- 直连 `Retrieve` 的好处：不依赖任何"应用"的控制台配置，绑定关系可以用 `aliyun bailian ListIndices`/`Retrieve` CLI 独立验证，排查路径更短、更确定。
+
+### B.3 新发现的数据层问题：`DOCMIND` 图像解析导致检索片段无文本
+
+即使切换到直连 `Retrieve` API，针对上述"政策法规"知识库的检索仍然返回 **0 个可用片段**——用 `aliyun bailian GetParseSettings` 确认，PDF 类型文件默认用 `DOCMIND`（文档智能解析）而非 `DOCMIND_DIGITAL`（电子文档解析）：前者把扫描版/复杂版式 PDF 解析成**图像块**（`Metadata.image_url`），`Text` 字段为空，服务于多模态问答场景；后者才会产出可直接拼进 LLM prompt 的纯文本片段。
+
+**结论**：这不是代码 bug，而是这批 PDF 文档的解析方式导致的数据特性。`BaiLianKB._parse_response()` 已加入过滤逻辑——跳过 `text` 为空的检索片段，避免把空字符串当作"检索到的上下文"注入 prompt。
+
+**后续建议**（未在本次实施，供用户参考）：
+1. 若这些 PDF 是数字原生（非扫描件），可在控制台/`ChangeParseSetting` API 里改用支持文本提取的解析方式，重新建索引。
+2. 若要快速验证"RAG 真正生效"的完整链路，可把 `examples/sample_docs/*.md`（纯文本/Markdown，天然走 `DOCMIND_DIGITAL`）上传到一个新知识库测试。
+3. 若希望利用图像块做多模态问答，需要引入支持视觉输入的模型与更大的架构改动，不在当前阶段范围内。
+
+### B.4 测试变化
+
+- `tests/test_bailian_kb.py` 完全重写：mock `alibabacloud_bailian20231229.client.Client`（而非 `dashscope`），新增"跳过空 text 节点"的专项测试用例。
+- `tests/test_config.py`：新增/调整必填项校验测试（`ALIBABA_CLOUD_ACCESS_KEY_ID`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID` 缺失时 fail-fast），`BAILIAN_APP_ID` 改为可选，不再校验。
+- 已用真实凭据端到端验证：`aliyun bailian Retrieve` CLI 直接调用、Python SDK 直接调用、以及通过 `/process` 完整链路调用，三者结果一致（检索到 0 条含文本片段，符合 B.3 结论）。
+
+### B.5 验收标准补充（阶段 1.2）
+
+- [ ] `.env` 配置 `ALIBABA_CLOUD_ACCESS_KEY_ID`/`_SECRET`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID` 后，`make test` 全部通过（mock，不发真实请求）
+- [ ] 用真实凭据运行 `aliyun bailian Retrieve --WorkspaceId ... --IndexId ...` 能返回非空 `Text` 字段的知识库，`/process` 回答应包含来自该知识库的真实内容（而非通用知识）
+- [ ] `BaiLianKB.retrieve()` 对空 text 节点、超时、API 错误三种场景均有清晰日志且优雅降级为空列表

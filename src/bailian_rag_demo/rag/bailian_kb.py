@@ -1,4 +1,17 @@
-"""Bailian (Alibaba Cloud Model Studio) RAG backend via dashscope."""
+"""Bailian (Alibaba Cloud Model Studio) RAG backend.
+
+Retrieves directly from a Bailian knowledge base index via the
+`alibabacloud_bailian20231229` OpenAPI SDK (`Retrieve` action), instead of
+going through `dashscope.Application.call()` on a Bailian "application".
+
+Why: an Bailian *application* must be explicitly bound to a knowledge base
+in the console for `Application.call()` to return `doc_references`; there is
+no API to verify/set that binding, and a misconfigured app silently
+degrades to zero-context RAG with no error. Calling `Retrieve` directly
+against a known `(workspace_id, index_id)` is unambiguous and independently
+verifiable (e.g. via `aliyun bailian ListIndices` / `Retrieve` CLI calls),
+and doesn't depend on any application's console configuration at all.
+"""
 import concurrent.futures
 import logging
 from typing import List, Dict, Optional
@@ -9,22 +22,32 @@ from bailian_rag_demo.config import Settings
 logger = logging.getLogger(__name__)
 
 try:
-    import dashscope
+    from alibabacloud_tea_openapi import models as open_api_models
+    from alibabacloud_bailian20231229.client import Client as BailianClient
+    from alibabacloud_bailian20231229 import models as bailian_models
 except ImportError:  # pragma: no cover
-    dashscope = None  # type: ignore
+    open_api_models = None  # type: ignore
+    BailianClient = None  # type: ignore
+    bailian_models = None  # type: ignore
 
 
 class BaiLianKB(KnowledgeBase):
-    """RAG backend that delegates retrieval to a Bailian application bound
-    to a knowledge index via dashscope.Application.call()."""
+    """RAG backend that retrieves directly from a Bailian knowledge base
+    index (bypasses the "application" concept entirely)."""
 
     def __init__(self, settings: Settings) -> None:
-        if dashscope is None:
+        if BailianClient is None:
             raise ImportError(
-                "dashscope is required for BaiLianKB; install via `pip install dashscope`"
+                "alibabacloud_bailian20231229 is required for BaiLianKB; "
+                "install via `pip install alibabacloud_bailian20231229`"
             )
         self._settings = settings
-        dashscope.api_key = settings.DASHSCOPE_API_KEY
+        config = open_api_models.Config(
+            access_key_id=settings.ALIBABA_CLOUD_ACCESS_KEY_ID,
+            access_key_secret=settings.ALIBABA_CLOUD_ACCESS_KEY_SECRET,
+            endpoint=f"bailian.{settings.BAILIAN_REGION_ID}.aliyuncs.com",
+        )
+        self._client = BailianClient(config)
 
     def name(self) -> str:
         return "bailian"
@@ -33,20 +56,15 @@ class BaiLianKB(KnowledgeBase):
         timeout = self._settings.RAG_TIMEOUT_SEC
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                request = bailian_models.RetrieveRequest(
+                    index_id=self._settings.BAILIAN_INDEX_ID,
+                    query=query,
+                    dense_similarity_top_k=top_k,
+                )
                 future = ex.submit(
-                    dashscope.Application.call,
-                    app_id=self._settings.BAILIAN_APP_ID,
-                    prompt=query,
-                    # NOTE: dashscope.Application.call's `top_k` parameter
-                    # controls LLM *sampling* (candidate set size), not the
-                    # number of retrieved documents -- there is no
-                    # client-side knob for retrieval count on this API; the
-                    # Bailian app's bound knowledge base/pipeline config
-                    # controls that server-side. Do NOT pass `top_k` here
-                    # (it would silently change generation behavior).
-                    # `doc_reference_type="indexed"` asks the API to return
-                    # `doc_references` when the app has RAG configured.
-                    doc_reference_type="indexed",
+                    self._client.retrieve,
+                    workspace_id=self._settings.BAILIAN_WORKSPACE_ID,
+                    request=request,
                 )
                 try:
                     response = future.result(timeout=timeout)
@@ -58,11 +76,13 @@ class BaiLianKB(KnowledgeBase):
             hits = self._parse_response(response)
             if not hits:
                 logger.info(
-                    "BaiLianKB.retrieve returned no doc_references for "
-                    "app_id=%s; verify in the Bailian console that this "
-                    "app is bound to a knowledge base with indexed "
-                    "documents.",
-                    self._settings.BAILIAN_APP_ID,
+                    "BaiLianKB.retrieve returned no usable text chunks for "
+                    "index_id=%s workspace_id=%s; check that the index has "
+                    "indexed documents with extractable text (scanned/"
+                    "image-parsed PDFs using the DOCMIND parser return "
+                    "chunks with empty text, only image_url).",
+                    self._settings.BAILIAN_INDEX_ID,
+                    self._settings.BAILIAN_WORKSPACE_ID,
                 )
             return hits
         except Exception as exc:  # broad: bail to empty + log
@@ -80,16 +100,29 @@ class BaiLianKB(KnowledgeBase):
         )
 
     @staticmethod
-    def _parse_response(response: Dict) -> List[RetrievalHit]:
-        output = (response or {}).get("output") or {}
-        references = output.get("doc_references") or []
+    def _parse_response(response) -> List[RetrievalHit]:
+        body = getattr(response, "body", None)
+        data = getattr(body, "data", None)
+        nodes = getattr(data, "nodes", None) or []
         hits: List[RetrievalHit] = []
-        for ref in references:
+        for node in nodes:
+            text = getattr(node, "text", None)
+            if not text:
+                # Nodes from image-parsed (DOCMIND) documents have no text
+                # content -- skip them rather than injecting an empty
+                # context block into the LLM prompt.
+                continue
+            metadata = getattr(node, "metadata", None) or {}
+            source = (
+                metadata.get("doc_name")
+                if isinstance(metadata, dict)
+                else getattr(metadata, "doc_name", None)
+            ) or "unknown"
             hits.append(
                 RetrievalHit(
-                    content=ref.get("content", ""),
-                    source=ref.get("title", "unknown"),
-                    score=float(ref.get("score", 0.0)),
+                    content=text,
+                    source=source,
+                    score=float(getattr(node, "score", 0.0) or 0.0),
                 )
             )
         return hits
