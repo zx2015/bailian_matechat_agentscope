@@ -88,3 +88,83 @@ def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
     assert out == "no context answer"
     assert "what is X?" not in captured["prompt"]
     assert "nope?" in captured["prompt"]
+
+
+def test_health_returns_ok(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.text == '"OK"'
+
+
+def test_process_with_rag_context(client, monkeypatch):
+    from bailian_rag_demo.rag.base import RetrievalHit
+
+    class FakeKB:
+        def __init__(self):
+            self.calls = []
+        def retrieve(self, query, top_k=5):
+            self.calls.append((query, top_k))
+            return [RetrievalHit(content="ctx-1", source="doc1.md", score=0.9)]
+        def add_documents(self, docs, metadatas=None):
+            pass
+        def name(self):
+            return "fake"
+
+    fake_kb = FakeKB()
+    monkeypatch.setattr(
+        "bailian_rag_demo.app.api.get_kb", lambda settings: fake_kb
+    )
+
+    captured = {}
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"output": {"choices": [{"message": {"content": "answer with ctx"}}]}}
+    monkeypatch.setattr("dashscope.Generation.call", fake_call)
+
+    resp = client.post(
+        "/process",
+        json={
+            "input": [
+                {"role": "user", "content": [{"type": "text", "text": "what?"}]}
+            ],
+            "session_id": "s1",
+            "user_id": "u1",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["output"][0]["role"] == "assistant"
+    assert body["output"][0]["content"][0]["text"] == "answer with ctx"
+    assert body["session_id"] == "s1"
+    assert fake_kb.calls == [("what?", 5)]
+    assert "ctx-1" in captured["prompt"]
+
+
+def test_process_handles_rag_empty(client, monkeypatch):
+    class FakeKB:
+        def retrieve(self, query, top_k=5):
+            return []
+        def add_documents(self, docs, metadatas=None):
+            pass
+        def name(self):
+            return "fake"
+
+    monkeypatch.setattr(
+        "bailian_rag_demo.app.api.get_kb", lambda settings: FakeKB()
+    )
+    monkeypatch.setattr(
+        "dashscope.Generation.call",
+        lambda **kw: {"output": {"choices": [{"message": {"content": "ok"}}]}},
+    )
+
+    resp = client.post(
+        "/process",
+        json={"input": [{"role": "user", "content": [{"type": "text", "text": "q"}]}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["output"][0]["content"][0]["text"] == "ok"
+
+
+def test_process_invalid_request_returns_422(client):
+    resp = client.post("/process", json={"input": "not-a-list"})
+    assert resp.status_code == 422
