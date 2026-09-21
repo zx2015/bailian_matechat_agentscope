@@ -3,7 +3,6 @@
 ## 进行中
 
 ## 待办
-- [ ] **【需用户决定】"政策法规"知识库（IndexId=4e25svhqsl）的 4 篇 PDF 均用 `DOCMIND`（图像解析）建索引，检索片段 `Text` 恒为空，无法用于当前纯文本 RAG 流程** — 需要用户决定：① 重新配置解析方式为可提取文本的方式并重建索引；② 或上传纯文本/Markdown 文档（如 `examples/sample_docs/`）到新知识库做验证；③ 或接受当前"检索为空→模型用通用知识回答"的降级行为 — 优先级：高
 - [ ] 阶段 2：实现 RAGFlowKB（独立的 KnowledgeBase 子类），增加本地切换开关 — 优先级：高
 - [ ] 给 `src/bailian_rag_demo/app/agent.py`（终端调试循环）加单元测试 — 优先级：中
 - [ ] 给 `frontend/` 加基础组件测试（当前无前端测试覆盖） — 优先级：中
@@ -25,3 +24,4 @@
 - [x] 阶段 1.1：MateChat 前端 + AgentScope 云端统一运行时（RuntimeAgent 改为 ReActAgent + DashScopeChatModel，新增 frontend/，requirements.txt 重新锁定含 agentscope==1.0.21）— 2026-09-21
 - [x] 修复 BaiLianKB 两个 bug：① 误将 `top_k` 当作检索文档数传给 `dashscope.Application.call`（该 API 里 `top_k` 实际是 LLM 采样参数，与检索无关），改为传 `doc_reference_type="indexed"` 以正确请求 `doc_references`；② `RAG_TIMEOUT_SEC` 默认值从 5.0s 提高到 10.0s（实测真实应用延迟 1.4s–10.8s 浮动，5s 经常导致检索被静默跳过）— 2026-09-21
 - [x] 阶段 1.2：安装官方 `aliyun` CLI 排查百炼知识库绑定问题，定位到真实可用知识库（IndexId=4e25svhqsl）；将 `BaiLianKB` 从 `dashscope.Application.call()`（依赖应用-知识库控制台绑定，无法 API 验证）改为直连 `alibabacloud_bailian20231229` 的 `Retrieve` OpenAPI（AK/SK 鉴权），彻底绕开"应用绑定"这层不确定性；发现该知识库 PDF 用 `DOCMIND` 图像解析导致检索片段无文本，代码已过滤处理，需用户决定后续数据侧方案 — 2026-09-21
+- [x] **RAG 检索已验证真正生效**：用户将知识库重新配置为文本可提取的索引方式（新 IndexId=4hzya44m4u，embedding 模型改为 `text-embedding-v4`），`Retrieve` 返回 5 条真实文本片段（score 0.77~0.88）；`/process` 端到端验证：`input_tokens` 从约 60 跃升到 1800~2400+（证明真实上下文被注入），回答明确标注"根据提供的资料"，且能准确回答文档具体细节（如"中国工会章程是2023年修改的"），与知识库真实文档内容一致 — 2026-09-21

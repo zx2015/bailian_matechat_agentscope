@@ -512,6 +512,18 @@ aliyun bailian Retrieve --WorkspaceId <ws> --IndexId <idx> --Query "..."  # 直�
 
 ### B.5 验收标准补充（阶段 1.2）
 
-- [ ] `.env` 配置 `ALIBABA_CLOUD_ACCESS_KEY_ID`/`_SECRET`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID` 后，`make test` 全部通过（mock，不发真实请求）
-- [ ] 用真实凭据运行 `aliyun bailian Retrieve --WorkspaceId ... --IndexId ...` 能返回非空 `Text` 字段的知识库，`/process` 回答应包含来自该知识库的真实内容（而非通用知识）
-- [ ] `BaiLianKB.retrieve()` 对空 text 节点、超时、API 错误三种场景均有清晰日志且优雅降级为空列表
+- [x] `.env` 配置 `ALIBABA_CLOUD_ACCESS_KEY_ID`/`_SECRET`、`BAILIAN_WORKSPACE_ID`、`BAILIAN_INDEX_ID` 后，`make test` 全部通过（mock，不发真实请求）
+- [x] 用真实凭据运行 `aliyun bailian Retrieve --WorkspaceId ... --IndexId ...` 能返回非空 `Text` 字段的知识库，`/process` 回答应包含来自该知识库的真实内容（而非通用知识）
+- [x] `BaiLianKB.retrieve()` 对空 text 节点、超时、API 错误三种场景均有清晰日志且优雅降级为空列表
+
+### B.6 后续确认（同日）：知识库重新配置后 RAG 检索验证生效
+
+用户将"政策法规"知识库重新配置为可提取文本的索引方式（新 `IndexId=4hzya44m4u`，`EmbeddingModelName` 由 `qwen3-vl-embedding`（多模态）改为 `text-embedding-v4`（纯文本），新增 `RerankModelName=qwen3-rerank`）。重新验证：
+
+- `aliyun bailian Retrieve --IndexId 4hzya44m4u --Query "工会经费管理有什么规定？"` 返回 5 条真实文本片段（`Text` 长度 600~965 字符，score 0.77~0.88），不再是空字符串。
+- 更新 `.env` 的 `BAILIAN_INDEX_ID` 为 `4hzya44m4u` 后，`/process` 端到端验证：
+  - `usage.input_tokens` 从约 60（无上下文）跃升至 1800~2400+（证明真实检索到的长文本被注入 prompt）；
+  - 回答明确出现"根据提供的资料"等措辞，且能准确回答文档细节问题（如"中国工会章程是哪年修改的？" → 正确答出"2023年"，与知识库中《中国工会章程（2023年修改）》文档吻合）。
+- `make test` 仍 23 项全绿（该验证不改动代码，仅调整 `.env` 运行时配置）。
+
+**结论**：阶段 1.2 的直连 `Retrieve` API 架构改造 + 知识库解析方式修正后，RAG 检索链路端到端验证通过，回答确认是基于知识库真实内容生成，而非模型通用知识编造。
