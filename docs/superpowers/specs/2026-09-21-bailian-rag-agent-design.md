@@ -1,7 +1,7 @@
 # 设计规格：百炼高代码 RAG 应用（阶段 1：百炼 RAG）
 
 **日期**：2026-09-21
-**状态**：已批准，待撰写实施计划
+**状态**：已批准，待撰写实施计划（阶段 1.1 更新见文末附录）
 **作者**：Claude (brainstorming + research)
 **项目路径**：`/media/data/git/bailian_demo`
 
@@ -412,5 +412,52 @@ requires-python = ">=3.10"
 ## 11. 后续阶段预告（不在本次实施）
 
 - **阶段 2**：RAGFlowKB 实现 + 抽象切换；增加本地命令行工具管理知识库索引
-- **阶段 3**：Spark Design 自定义前端 WebUI
+- **阶段 3**：Spark Design 自定义前端 WebUI（**已提前在阶段 1.1 用 MateChat 替代实现，见附录**）
 - **阶段 4**：MCP 工具接入（如联网搜索、计算器）
+
+---
+
+## 附录：阶段 1.1 更新（MateChat 前端 + AgentScope 云端运行）
+
+**日期**：2026-09-21（同日追加）
+**变更原因**：用户要求前端改用 MateChat，且百炼云端运行时也要真正跑 AgentScope 编排（而不是仅本地调试），同时保留 BaiLianKB 检索百炼 RAG 不变。
+
+### A.1 关键架构变化
+
+1. **AgentScope 从"仅本地"升级为"本地 + 云端统一实现"**
+   - 原设计中 `runtime_agent.py`（云端路径）不依赖 AgentScope，仅用 `dashscope.Generation.call`；`agent.py`（本地）才用 AgentScope。
+   - **现在**：`app/runtime_agent.py::RuntimeAgent` 直接封装 AgentScope 的 `ReActAgent`（绑定 `DashScopeChatModel` + `DashScopeChatFormatter`），是本地和云端**唯一**的智能体实现。`agentscope` 从"本地调试软依赖"变为**运行时硬依赖**，写入 `requirements.txt`（`agentscope==1.0.21`）。
+   - `app/agent.py` 不再是独立的 AgentScope 封装，改为一个基于同一 `RuntimeAgent` 的终端调试循环（stdin/stdout），方便本地迭代 prompt/RAG 行为而无需过 HTTP。
+   - `RuntimeAgent` 按 `session_id` 维护独立的 `ReActAgent` 实例（及其内建的对话内存），使多轮对话在同一进程内保持上下文。
+
+2. **RAG 检索方式保持不变**
+   - 继续使用 `BaiLianKB.retrieve()`（`dashscope.Application.call`）做检索，超时/异常降级为空列表的策略不变。
+   - 检索结果不再直接拼进纯文本 prompt 交给 `dashscope.Generation.call`，而是拼装为 AgentScope 的 `Msg`（`role="user"`）内容前缀（`[参考资料]...[用户问题]...`），再交给 `ReActAgent` 推理。
+
+3. **新增 MateChat 前端，随 wheel 一起部署**
+   - 新增 `frontend/` 目录：Vue 3 + TypeScript + Vite + `@matechat/core`（MateChat UI 库）+ `vue-devui`。
+   - `frontend/src/App.vue` 实现一个基础对话界面（欢迎页 + 消息气泡 + 输入框），直接 `fetch('/process', ...)` 调用后端 Agent API 协议接口；每个浏览器 tab 生成一个 `session_id`，随请求带上以维持多轮对话记忆。
+   - 构建产物（`npm run build` → `frontend/dist/`）由 `make frontend-build` 复制到 `src/bailian_rag_demo/static/`，`pyproject.toml` 的 `package-data` 将其纳入 wheel。
+   - `app/api.py::create_app()` 在注册完 `/health`、`/process` 路由后，用 `StaticFiles(html=True)` 把 `static/` 挂载到 `/`（必须最后挂载，避免遮蔽已注册的 API 路由）。若 `static/` 不存在（未构建前端），API 仍可正常工作，只是根路径无 UI。
+   - 百炼高代码应用运行时因此**同时提供** Agent API（供应用中心对话面板调用）和一个可直接访问的 MateChat 网页 UI（同一进程、同一端口）。
+
+### A.2 依赖与构建流程变化
+
+- `requirements.txt`：在干净 venv 中以 `fastapi==0.139.0 uvicorn[standard]==0.43.0 pydantic==2.13.4 dashscope==1.27.6 agentscope==1.0.21 httpx==0.27.0 pytest==8.2.1 ...` 为种子重新 `pip freeze`，新增 AgentScope 及其传递依赖（`mcp`、`opentelemetry-*`、`shortuuid` 等）。
+- `Makefile` 新增 `frontend-install`、`frontend-build` 目标；`build` 目标现在依赖 `frontend-build`，因此 `make build` 会先构建前端再打包 wheel。`clean` 同步清理 `frontend/dist/` 与 `src/bailian_rag_demo/static/`。
+- `.gitignore` 新增：`frontend/node_modules/`、`frontend/dist/`、`src/bailian_rag_demo/static/`（生成物，不入库）。
+- `pyproject.toml` 的 `[tool.setuptools.package-data]` 增加 `"static/**/*"`。
+
+### A.3 测试变化
+
+- `tests/test_api.py`、`tests/test_bailian_kb.py` 中原先 mock `dashscope.Generation.call` 的用例，改为 mock `agentscope.model.DashScopeChatModel.__call__`（返回 `ChatResponse(content=[TextBlock(...)], usage=ChatUsage(...))`），以匹配新的 AgentScope 调用路径。
+- 新增/调整的关键断言：验证 RAG 命中内容被正确拼入 AgentScope 的用户消息 content 中；验证 usage 字段从 `ChatUsage` 正确转换为响应体的 `{"input_tokens", "output_tokens"}`。
+- 已在本地实机验证（非 mock）：`make dev` 启动后 `curl /health` 返回 `OK`；`curl /` 返回构建好的 MateChat `index.html` 与静态资源（200）；`curl -X POST /process`（假 API Key）走完整链路后在 DashScope 鉴权失败时被捕获为 `500`（而非进程崩溃）；非法请求体返回 `422`。
+
+### A.4 验收标准补充（阶段 1.1）
+
+- [ ] `make frontend-build` 在干净环境中成功（需要 Node.js + npm）
+- [ ] `make build` 产出的 `dist/*.whl` 中包含 `bailian_rag_demo/static/index.html` 及其资源
+- [ ] 本地 `make dev` 后，浏览器访问 `http://127.0.0.1:8000/` 可看到 MateChat 对话界面并能提问
+- [ ] 百炼应用中心部署后，`/` 路径可直接访问 MateChat UI；应用中心自带对话面板通过 `/process` 调用同一 `RuntimeAgent`，行为一致
+- [ ] `make test` 全部通过，且不发起真实网络调用

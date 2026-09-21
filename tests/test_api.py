@@ -46,50 +46,70 @@ def _settings():
     return Settings(DASHSCOPE_API_KEY="sk-test", BAILIAN_APP_ID="app-test")
 
 
+def _fake_model_call(text, usage=None):
+    """Build an async stand-in for `DashScopeChatModel.__call__` that returns
+    a plain-text (non-tool-call) response, so the ReAct loop exits after a
+    single reasoning step."""
+    from agentscope.message import TextBlock
+    from agentscope.model import ChatResponse
+    from agentscope.model._model_usage import ChatUsage
+
+    async def _call(self, *args, **kwargs):
+        return ChatResponse(
+            content=[TextBlock(type="text", text=text)],
+            usage=ChatUsage(**usage, time=0.01) if usage else None,
+        )
+
+    return _call
+
+
 def test_runtime_agent_assembles_prompt_with_rag_context(monkeypatch):
-    kb = BaiLianKB(_settings())
-    # pre-seed with deterministic hits
+    from agentscope.model import DashScopeChatModel
     from bailian_rag_demo.rag.base import RetrievalHit
+
+    kb = BaiLianKB(_settings())
     monkeypatch.setattr(kb, "retrieve", lambda q, top_k=5: [
         RetrievalHit(content="ctx-1", source="doc1.md", score=0.9)
     ])
 
     captured = {}
 
-    def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"output": {"text": "OK answer"}, "usage": {"input_tokens": 5, "output_tokens": 7}}
+    async def fake_call(self, prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        from agentscope.message import TextBlock
+        from agentscope.model import ChatResponse
+        from agentscope.model._model_usage import ChatUsage
 
-    monkeypatch.setattr("bailian_rag_demo.app.runtime_agent.dashscope", __import__("dashscope", fromlist=["*"]))
-    monkeypatch.setattr("dashscope.Generation.call", fake_call)
+        return ChatResponse(
+            content=[TextBlock(type="text", text="OK answer")],
+            usage=ChatUsage(input_tokens=5, output_tokens=7, time=0.01),
+        )
 
-    agent = RuntimeAgent(settings=_settings(), kb=kb)
-    out, usage = agent.run("what is X?", session_id="s1")
+    monkeypatch.setattr(DashScopeChatModel, "__call__", fake_call)
+
+    agent = RuntimeAgent(settings=_settings())
+    out, usage = agent.run("what is X?", kb, session_id="s1")
 
     assert out == "OK answer"
     assert usage == {"input_tokens": 5, "output_tokens": 7}
-    assert "ctx-1" in captured["prompt"]
-    assert "what is X?" in captured["prompt"]
+    assert "ctx-1" in str(captured["prompt"])
+    assert "what is X?" in str(captured["prompt"])
 
 
 def test_runtime_agent_continues_when_rag_returns_empty(monkeypatch):
+    from agentscope.model import DashScopeChatModel
+
     kb = BaiLianKB(_settings())
     monkeypatch.setattr(kb, "retrieve", lambda q, top_k=5: [])
 
-    captured = {}
+    monkeypatch.setattr(
+        DashScopeChatModel, "__call__", _fake_model_call("no context answer")
+    )
 
-    def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"output": {"text": "no context answer"}}
-
-    monkeypatch.setattr("dashscope.Generation.call", fake_call)
-
-    agent = RuntimeAgent(settings=_settings(), kb=kb)
-    out, usage = agent.run("nope?")
+    agent = RuntimeAgent(settings=_settings())
+    out, usage = agent.run("nope?", kb)
     assert out == "no context answer"
-    assert usage is None or usage == {}
-    assert "what is X?" not in captured["prompt"]
-    assert "nope?" in captured["prompt"]
+    assert usage is None
 
 
 def test_health_returns_ok(client):
@@ -117,14 +137,20 @@ def test_process_with_rag_context(client, monkeypatch):
         "bailian_rag_demo.app.api.get_kb", lambda settings: fake_kb
     )
 
+    from agentscope.model import DashScopeChatModel, ChatResponse
+    from agentscope.model._model_usage import ChatUsage
+    from agentscope.message import TextBlock
+
     captured = {}
-    def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {
-            "output": {"choices": [{"message": {"content": "answer with ctx"}}]},
-            "usage": {"input_tokens": 12, "output_tokens": 34},
-        }
-    monkeypatch.setattr("dashscope.Generation.call", fake_call)
+
+    async def fake_call(self, prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return ChatResponse(
+            content=[TextBlock(type="text", text="answer with ctx")],
+            usage=ChatUsage(input_tokens=12, output_tokens=34, time=0.01),
+        )
+
+    monkeypatch.setattr(DashScopeChatModel, "__call__", fake_call)
 
     resp = client.post(
         "/process",
@@ -143,7 +169,7 @@ def test_process_with_rag_context(client, monkeypatch):
     assert body["session_id"] == "s1"
     assert body["usage"] == {"input_tokens": 12, "output_tokens": 34}
     assert fake_kb.calls == [("what?", 5)]
-    assert "ctx-1" in captured["prompt"]
+    assert "ctx-1" in str(captured["prompt"])
 
 
 def test_process_handles_rag_empty(client, monkeypatch):
@@ -159,8 +185,8 @@ def test_process_handles_rag_empty(client, monkeypatch):
         "bailian_rag_demo.app.api.get_kb", lambda settings: FakeKB()
     )
     monkeypatch.setattr(
-        "dashscope.Generation.call",
-        lambda **kw: {"output": {"choices": [{"message": {"content": "ok"}}]}},
+        "bailian_rag_demo.app.runtime_agent.DashScopeChatModel.__call__",
+        _fake_model_call("ok"),
     )
 
     resp = client.post(

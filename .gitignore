@@ -17,7 +17,15 @@ __pycache__/
 # Local knowledge base (per global CLAUDE.md)
 .learnings/
 
+# Frontend (MateChat) build artifacts
+frontend/node_modules/
+frontend/dist/
+src/bailian_rag_demo/static/
+
 # IDE
 .vscode/
-.idea/.coverage
+.idea/
+
+# Test artifacts
 .coverage
+.ruff_cache/

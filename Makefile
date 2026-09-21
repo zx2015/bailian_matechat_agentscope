@@ -1,6 +1,8 @@
-.PHONY: help install dev test test-upload build upload update clean
+.PHONY: help install dev test test-upload frontend-install frontend-build build upload update clean
 
 PYTHON ?= python
+NPM ?= npm
+STATIC_DIR := src/bailian_rag_demo/static
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -18,7 +20,16 @@ test:  ## Run pytest
 test-upload:  ## Curl-based smoke test against locally-running server
 	bash scripts/test_local.sh
 
-build:  ## Build wheel (artifact in dist/)
+frontend-install:  ## Install MateChat frontend dependencies
+	cd frontend && $(NPM) install
+
+frontend-build: frontend-install  ## Build the MateChat frontend and copy it into the package (served at "/")
+	cd frontend && $(NPM) run build
+	rm -rf $(STATIC_DIR)
+	mkdir -p $(STATIC_DIR)
+	cp -r frontend/dist/. $(STATIC_DIR)/
+
+build: frontend-build  ## Build wheel, bundling the MateChat frontend (artifact in dist/)
 	$(PYTHON) -m pip install --quiet build
 	$(PYTHON) -m build
 
@@ -35,4 +46,5 @@ endif
 	runtime-fc-deploy --update "$(APP_ID)" --whl-path dist/*.whl
 
 clean:  ## Remove build artifacts
-	rm -rf build/ dist/ src/*.egg-info src/bailian_rag_demo.egg-info
+	rm -rf build/ dist/ src/*.egg-info src/bailian_rag_demo.egg-info $(STATIC_DIR) frontend/dist
+

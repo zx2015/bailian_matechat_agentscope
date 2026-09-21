@@ -4,11 +4,10 @@
 
 ## 待办
 - [ ] 阶段 2：实现 RAGFlowKB（独立的 KnowledgeBase 子类），增加本地切换开关 — 优先级：高
-- [ ] 在 .gitignore 补全 `.mypy_cache/`、`.ruff_cache/`、`.DS_Store`（Minor 建议） — 优先级：低
-- [ ] 在 README.md 补充 `make test-upload` 一键启动+测试+关闭流程（Minor 建议） — 优先级：低
-- [ ] 给 `src/bailian_rag_demo/app/agent.py` 加单元测试（Minor 建议，LocalAgent 当前 0% 覆盖） — 优先级：中
+- [ ] 给 `src/bailian_rag_demo/app/agent.py`（终端调试循环）加单元测试 — 优先级：中
+- [ ] 给 `frontend/` 加基础组件测试（当前无前端测试覆盖） — 优先级：中
+- [ ] 评估 MateChat 前端产物体积（>500KB 的 mermaid 相关 chunk 未做代码分割） — 优先级：低
 - [ ] ruff 静态检查：`tests/test_api.py` 等未使用 `import pytest` 等清理 — 优先级：低
-- [ ] 测试断言 `tests/test_bailian_kb.py:57` 中 `or True` 永远为真，应收紧 — 优先级：中
 
 ## 已完成
 - [x] Task 1: 项目骨架 + wheel 配置 — 2026-09-21（commit d5e5e3b）
@@ -22,3 +21,4 @@
 - [x] Task 9: Makefile、requirements、samples — 2026-09-21（commit ddbf48e）
 - [x] Task 10: README + CLAUDE.md — 2026-09-21（commit 8c21f8a）
 - [x] 修复代码审查 4 个 Important 项 — 2026-09-21（commit 32818c9）
+- [x] 阶段 1.1：MateChat 前端 + AgentScope 云端统一运行时（RuntimeAgent 改为 ReActAgent + DashScopeChatModel，新增 frontend/，requirements.txt 重新锁定含 agentscope==1.0.21）— 2026-09-21

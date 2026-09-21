@@ -15,7 +15,7 @@ where = ["src"]
 include = ["bailian_rag_demo*"]
 
 [tool.setuptools.package-data]
-bailian_rag_demo = ["main.py"]
+bailian_rag_demo = ["main.py", "static/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

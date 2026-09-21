@@ -1,32 +1,46 @@
-"""Local AgentScope agent for developer debugging.
+"""Local terminal debug loop for developers.
 
-Not used inside the Bailian runtime. Provides a familiar ReAct-style entry
-point for iterating on prompts / RAG behavior without redeploying.
+Both local development and the Bailian-hosted runtime now share the exact
+same AgentScope-based agent stack (`bailian_rag_demo.app.runtime_agent`).
+This module simply wires that agent to stdin/stdout so it can be exercised
+without a full HTTP round-trip while iterating on prompts / RAG behavior.
+
+Usage:
+    python -m bailian_rag_demo.app.agent
 """
+import asyncio
 import logging
 
-from bailian_rag_demo.config import Settings
-from bailian_rag_demo.rag.base import KnowledgeBase
+from bailian_rag_demo.app.runtime_agent import RuntimeAgent
+from bailian_rag_demo.config import load_settings
+from bailian_rag_demo.rag.bailian_kb import BaiLianKB
 
 logger = logging.getLogger(__name__)
 
 
-class LocalAgent:
-    """Thin wrapper that mirrors RuntimeAgent's contract using AgentScope."""
+async def _chat_loop() -> None:
+    settings = load_settings()
+    kb = BaiLianKB(settings)
+    agent = RuntimeAgent(settings=settings)
+    session_id = "local-debug"
 
-    def __init__(self, settings: Settings, kb: KnowledgeBase) -> None:
-        self._settings = settings
-        self._kb = kb
-
-    def chat(self, query: str) -> str:
-        hits = self._kb.retrieve(query, top_k=self._settings.BAILIAN_RAG_TOP_K)
-        context = "\n".join(f"[{h.source}] {h.content}" for h in hits) or "(none)"
+    print("Bailian RAG local debug chat. Type 'exit' to quit.")
+    while True:
         try:
-            import agentscope  # type: ignore
-        except ImportError:
-            logger.warning("agentscope not installed; falling back to plain echo")
-            return f"[local-fallback] ctx={context!r} query={query!r}"
-        # Minimal AgentScope usage: print context and return a placeholder.
-        # Real implementations can swap in ReActAgent / etc.
-        logger.info("agentscope version: %s", getattr(agentscope, "__version__", "?"))
-        return f"[agentscope] ctx-len={len(context)} q={query}"
+            query = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not query or query.lower() in {"exit", "quit"}:
+            break
+        answer, usage = await agent.run_async(query, kb, session_id=session_id)
+        print(f"Assistant: {answer}")
+        if usage:
+            print(f"  (usage: {usage})")
+
+
+def main() -> None:
+    asyncio.run(_chat_loop())
+
+
+if __name__ == "__main__":
+    main()
