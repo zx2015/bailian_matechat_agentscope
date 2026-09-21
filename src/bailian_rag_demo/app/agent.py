@@ -4,7 +4,6 @@ Not used inside the Bailian runtime. Provides a familiar ReAct-style entry
 point for iterating on prompts / RAG behavior without redeploying.
 """
 import logging
-from typing import List
 
 from bailian_rag_demo.config import Settings
 from bailian_rag_demo.rag.base import KnowledgeBase

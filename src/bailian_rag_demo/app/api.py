@@ -1,6 +1,5 @@
 """FastAPI routes for the Bailian Rich Code Application."""
 import logging
-from functools import lru_cache
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
